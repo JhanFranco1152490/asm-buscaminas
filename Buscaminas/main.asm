@@ -11,11 +11,14 @@
     msg_welcome db 'Bienvenido al Buscaminas!',0Dh,0Ah,'$'
     msg_start_game db 'Presiona para empezar el juego',0Dh,0Ah,'$'
     msg_buscaminas db 'BUSCAMINAS ASSEMBLER',0Dh,0Ah,'$'
-    msg_enter_rows db 'Ingresa las Filas del Tablero: $'
-    msg_enter_colums db 'Ingresa las Columnas del Tablero: $'
-    msg_enter_bombs db 'Ingresa Bombas del Tablero Maximo $'
+    msg_enter_move_type db 'Ingresa el tipo de movimiento(R:Revelar,F:Flag): $'
+    msg_enter_rows db 'Ingresa las Filas del Tablero(1-9): $'
+    msg_enter_colums db 'Ingresa las Columnas del Tablero(1-9): $'
+    msg_enter_bombs db 'Ingresa Bombas del Tablero (Maximo $'
+    msg_enter_bombs2 db '): $'
     msg_invalid_entry db 'Dato Invalido',0Dh,0Ah,'$'
-    msg_enter_move db 'Ingresa tu movimiento (fila, columna): $'
+    msg_number_of_bombs db 'Numero de Bombas: $'
+    msg_number_of_flags db 'Numero de Banderas: $'
     msg_enter_move_row db 'Ingresa tu movimiento (fila): $'
     msg_enter_move_column db 'Ingresa tu movimiento (columna): $'
     msg_invalid_move db 'Movimiento invalido!',0Dh,0Ah,'$'
@@ -23,37 +26,56 @@
     msg_victory db 'Felicidades, has ganado!',0Dh,0Ah,'$'
     msg_new_game db 'Presiona X para volver a jugar',0Dh,0Ah,'$'
     msg_new_line db 0Dh,0Ah,'$'
+
     ;Tablero a imprimir
-    tablero db 221 dup(0)
+    display_board db 211 dup(0) ;211 = (1+(2*9columnas)+1(0A)+1(0D))*10filas+1($)
 
     ;Tablero interno
-    tablero_game db 221 dup('O')
+    hidden_board db 211 dup('O')
+    
+    ;Buffer para ints
+    input_buffer db 10, 0, 10 dup(0) ;10 Espacios
 
     ;Variables
-    tablero_rows    dw 0
-    tablero_colums  dw 0
-    tablero_size    dw 0
-    bombas          dw 0
-    contador        dw 0
-    contador_bombs  dw 0
-    fila            dw 0
-    columna         dw 0
-    posicion_actual dw 0
-    posicion_actual_tablero dw 0
-    aux             dw 0
-    error           equ -1
+    board_rows          dw 0
+    board_cols          dw 0
+    board_size          dw 0
+    total_bombs         dw 0
+    revealed_cells      dw 0
+    adjacent_bombs      dw 0
+    placed_flags        dw 0
+    move_type           dw 0
+    row_index           dw 0
+    col_index           dw 0
+    cell_index          dw 0
+    screen_index        dw 0
+    temp_counter        dw 0
+    ERROR_CODE          equ -1
 
 .code
 
-;Macro para imprimir mensajes
-print_msg macro string
+;Macro para limpiar la pantalla
+limpiar_pantalla macro
     push ax
-    push dx
-    mov dx, offset string
-    mov ah, 9h
-    int 21h
-    pop dx
+    mov ah, 00h
+    mov al, 3h
+    int 10h
     pop ax
+endm
+
+;Macro para esperar una tecla
+esperar_tecla macro
+    push ax
+    mov ah, 00h
+    int 16h
+    pop ax
+endm
+
+;Macro para leer un char
+leer_char macro
+    mov ah, 01h 
+    int 21h
+    xor ah,ah ;Guarda el char en al
 endm
 
 ;Macro para imprimir char
@@ -67,31 +89,108 @@ print_char macro char
     pop ax
 endm
 
-;Macro para esperar una tecla
-esperar_tecla macro
-    push ax
-    mov ah, 00h
-    int 16h
-    pop ax
-endm
-
-;macro para leer un char
-leer_char macro
-    mov ah, 01h 
+;Macro para leer un string
+leer_string macro buffer
+    push dx
+    lea dx, buffer
+    mov ah, 0Ah
     int 21h
-    xor ah,ah
+    pop dx
 endm
 
-;macro para limpiar la pantalla
-limpiar_pantalla macro
+;Macro para imprimir mensajes
+print_msg macro string
     push ax
-    mov ah, 00h
-    mov al, 3h
-    int 10h
+    push dx
+    lea dx, string
+    mov ah, 9h
+    int 21h
+    pop dx
     pop ax
 endm
 
-;macro para obtener un numero aleatorio
+;Macro para pasar un string a int
+string_to_int macro string
+    LOCAL convert_loop
+    LOCAL convert_fin
+    push bx
+    push cx
+    push dx
+    push si
+    
+    lea si, string
+    add si, 2d
+
+    xor ax, ax
+    xor bx, bx
+    mov cx, 10
+    
+convert_loop:
+    mov bl, [si]
+    cmp bl, '0'
+    jl convert_fin
+    cmp bl, '9'
+    jg convert_fin
+    
+    sub bl, '0'
+    mul cx
+    add ax, bx ;Guarda en ax
+    inc si
+    jmp convert_loop
+
+convert_fin:
+    pop si
+    pop dx
+    pop cx
+    pop bx
+endm
+
+;Macro para imprimir un numero
+print_number macro number
+    LOCAL no_cero
+    LOCAL extraer_digitos
+    LOCAL imprimir_digitos
+    LOCAL print_fin
+    push ax
+    push bx
+    push cx
+    push dx
+
+    mov ax,number
+    cmp ax, 0
+    jne no_cero
+    mov dl, '0'
+    mov ah, 02h
+    int 21h
+    jmp print_fin
+    
+no_cero:
+    mov cx, 0
+    mov bx, 10
+    
+extraer_digitos:
+    xor dx, dx
+    div bx
+    push dx
+    inc cx
+    cmp ax, 0
+    jne extraer_digitos
+    
+imprimir_digitos:
+    pop dx
+    add dl, '0'
+    mov ah, 02h
+    int 21h
+    loop imprimir_digitos
+    
+print_fin:
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+endm
+
+;Macro para obtener un numero aleatorio
 random macro rango
     LOCAL div_cero
     LOCAL fin_random
@@ -107,8 +206,8 @@ random macro rango
     je div_cero
     div bx
     xor ah, ah
-    mov al, dl
-    jmp fin_random
+    mov al, dl ;Guarda el random en al
+    jmp fin_random 
 div_cero:
     mov ax, 0h
 fin_random:
@@ -118,9 +217,9 @@ fin_random:
 endm
 
 ;Macro para mezclar las posiciones de un arreglo
-mezclar_arreglo macro arr
-    LOCAL mezcla_loop
-    LOCAL fin_mezcla
+mezclar_arreglo macro arr, size
+    LOCAL bucle_mezclar
+    LOCAL fin_mezclar_arreglo
     push ax
     push bx
     push cx
@@ -129,16 +228,16 @@ mezclar_arreglo macro arr
     push di
 
     ; obtener tamaño
-    mov ax, tablero_size
+    mov ax, size
     mov cx, ax
     dec cx              ; comenzamos en tamaño-1
 
     ; si cx = 0 o negativo, no hacer nada
     cmp cx, 0
-    jle fin_mezcla
+    jle fin_mezclar_arreglo
 
     lea si, arr
-mezcla_loop:
+bucle_mezclar:
     ; rango = cx+1  -> lo ponemos en BX y llamamos random
     mov bx, cx
     inc bx
@@ -155,9 +254,9 @@ mezcla_loop:
     mov BYTE PTR [si+bx], al
 
     dec cx
-    jnz mezcla_loop
+    jnz bucle_mezclar
 
-fin_mezcla:
+fin_mezclar_arreglo:
     pop di
     pop si
     pop dx
@@ -173,158 +272,165 @@ main PROC
     MOV ds, ax
 
     ;Empezar el juego    
-empezar_game:
+inicio_juego:
     ;limpiar pantalla
     limpiar_pantalla
     ; Mostrar mensaje de bienvenida
     print_msg msg_welcome
     print_msg msg_start_game
     esperar_tecla
-    call leer_datos_tablero
-    call crear_tablero_ramdom
-    call crear_tablero_interfaz
-    call empezar_juego
+    call leer_configuracion_tablero
+    call generar_bombas_aleatorias
+    call dibujar_tablero_inicial
+    call bucle_principal
 
-reinicio:
-    call crear_tablero_real
-    print_msg tablero
+reiniciar_partida:
+    call mostrar_tablero_final
+    print_msg display_board
     print_msg msg_new_game
     leer_char
     cmp ax, 'X'
-    jne fin_programa
-    call reiniciar_juego
-    jmp empezar_game
+    jne terminar_programa
+    call reiniciar_estado_juego
+    jmp inicio_juego
 
     ;Salir del programa
-fin_programa:
+terminar_programa:
     mov ah, 4Ch
     int 21h
 main ENDP
     
 ;PROCEDIMIENTOS
 
-;Procedimiento para pedir datos del tablero
-leer_datos_tablero PROC
-pedir_row:
+;Procedimiento para pedir datos del display_board
+leer_configuracion_tablero PROC
+entrada_filas:
     limpiar_pantalla
     print_msg msg_enter_rows
-    call pedir_dimension_tablero
+    call leer_dimension
     esperar_tecla
-    cmp ax, error
-    je pedir_row
-    mov tablero_rows,ax
-pedir_colum:
+    cmp ax, ERROR_CODE
+    je entrada_filas
+    mov board_rows,ax
+
+entrada_columnas:
     limpiar_pantalla
     print_msg msg_enter_colums
-    call pedir_dimension_tablero
+    call leer_dimension
     esperar_tecla
-    mov tablero_colums,ax
-    cmp ax, error
-    je pedir_colum
+    mov board_cols,ax
+    cmp ax, ERROR_CODE
+    je entrada_columnas
 
-    ;Calcular tamaño del tablero
-    mov ax, tablero_rows
-    mov bx, tablero_colums
-    mul bx
-    mov tablero_size, ax  
+    ;Calcular tamaño del display_board
+    mov ax, board_rows
+    mul board_cols
+    mov board_size, ax  
 
-pedir_bombas:
+entrada_bombas:
     limpiar_pantalla
     print_msg msg_enter_bombs
-    call pedir_dimension_tablero
-    cmp ax, error
-    je pedir_bombas
-    mov bombas, ax
-
-    mov ax, tablero_size
-    sub ax, 1
-    cmp bombas, ax
-    jg bombas_invalidas
-    esperar_tecla
+    mov ax, board_size
+    dec ax
+    print_number ax
+    print_msg msg_enter_bombs2
+    ;Leer numero de total_bombs
+    leer_string input_buffer
+    string_to_int input_buffer
+    cmp ax,0
+    jle error_cantidad_bombas
+    cmp ax, board_size
+    jge error_cantidad_bombas
+    mov total_bombs, ax
     ret
-
-bombas_invalidas:
-    print_msg msg_new_line
+error_cantidad_bombas:
+    print_msg msg_new_line    
     print_msg msg_invalid_entry
     esperar_tecla
-    jmp pedir_bombas
-leer_datos_tablero ENDP
+    jmp entrada_bombas
+leer_configuracion_tablero ENDP
 
-pedir_dimension_tablero PROC
+;Procedimiento para pedir la dimension de un lado del display_board
+leer_dimension PROC
     leer_char
     cmp al, '0'
-    jle error_enter_tablero 
+    jle error_dimension_invalida 
     mov ah, '0'
     add ah, 10d
     cmp al, ah
-    jge error_enter_tablero
+    jge error_dimension_invalida
     xor ah,ah
-    sub al, '0'
+    sub al, '0' ;devuelve en al el valor
     ret
-error_enter_tablero:
+error_dimension_invalida:
     print_msg msg_new_line
     print_msg msg_invalid_entry
-    mov ax, error
+    mov ax, ERROR_CODE
     ret
-pedir_dimension_tablero ENDP
+leer_dimension ENDP
 
-;Procedimiento para crear el tablero de juego aleatoriamente
-crear_tablero_ramdom PROC
+;Procedimiento para crear el display_board de juego aleatoriamente
+generar_bombas_aleatorias PROC
     push ax
     push bx
     push cx
     push si
     push di
 
-    lea si, tablero_game
+    lea si, hidden_board
 
-    ; Cargar tamaño del tablero en CX
-    mov ax, tablero_size
+    ; Cargar tamaño del display_board en CX
+    mov ax, board_size
     mov cx, ax
 
-    ; Colocar 'bombas' X en las primeras posiciones
-    mov cx, bombas     ; número de bombas a colocar
-    xor bx, bx                  ; inicio en índice 0
-.colocar:
+    ; Colocar X en las primeras 'total_bombs' posiciones
+    mov cx, total_bombs
+    xor bx, bx                 
+
+bucle_colocar_bombas:
     mov byte ptr [si + bx], 'X'
     inc bx
     dec cx
-    jnz .colocar
+    jnz bucle_colocar_bombas
 
+fin_crear_bombas:
     mov bx, ax
     mov byte ptr [si + bx], '$'
-    ; Llamar a mezclar_arreglo (espera DS:SI con base del arreglo)
+
+    ; Llamar a mezclar_arreglo
+    mezclar_arreglo hidden_board, board_size
     print_msg msg_new_line
-    mezclar_arreglo tablero_game
-    print_msg tablero_game
-    esperar_tecla
+
     pop di
     pop si
     pop cx
     pop bx
     pop ax
     ret
-crear_tablero_ramdom ENDP
+generar_bombas_aleatorias ENDP
 
-crear_tablero_interfaz PROC
+;Procedimiento para crear el display_board de la interfaz
+dibujar_tablero_inicial PROC
     push cx
     push dx
-    mov ax, tablero_colums
-    mov cx, 2d
-    mul cx
-    sub ax, 1d
+
+    ;Calcular cuantos ciclos para las letras 
+    mov ax, 2d
+    mul board_cols
+    dec ax
     mov cx, ax
-    lea si, tablero
+    lea si, display_board
     mov bx, 0d
     mov BYTE PTR [si+bx],' '
     inc bx
     mov BYTE PTR [si+bx],' '
     inc bx
-dibujar_letras:
-    test bx,1
-    jz letra
-    jmp espacio 
-letra:
+
+bucle_columnas_titulo:
+    test bx,1 ; Saber si es posicion par o impar
+    jz escribir_letra_columna
+    jmp escribir_espacio_columna 
+escribir_letra_columna:
     mov ax, bx
     push bx
     mov bx, 2d
@@ -333,309 +439,405 @@ letra:
     sub ax, 1
     add ax, 'A'
     mov BYTE PTR [si+bx], al
-    jmp fin_crear
-espacio:
-    mov BYTE PTR [si+bx], ' '
-fin_crear:
-    inc bx
-    loop dibujar_letras
+    jmp fin_dibujo_columnas
 
+escribir_espacio_columna:
+    mov BYTE PTR [si+bx], ' '
+
+fin_dibujo_columnas:
+    inc bx
+    loop bucle_columnas_titulo
+
+    ;Colocar final de la linea
     mov BYTE PTR [si+bx], 0Dh
     inc bx
     mov BYTE PTR [si+bx], 0Ah
     inc bx
 
-    mov cx, tablero_rows
-    mov contador, 1d
-dibujar_row:
-    mov ax, contador
+    ;Repetir el ciclo el numero de filas
+    mov cx, board_rows
+    mov temp_counter, 1d ;Numero de Fila
+
+bucle_filas_tablero:
+    mov ax, temp_counter
     add ax, '0'  
     mov BYTE PTR [si+bx], al
     inc bx
-    inc contador
-    mov dx, tablero_colums
-dibujar_casillas:
+    inc temp_counter
+    mov dx, board_cols
+
+bucle_celdas_fila:
+    ;Alternar un espacio con un simbolo
     mov BYTE PTR [si+bx], ' '
     inc bx
     mov al, '-'  
     mov BYTE PTR [si+bx], al
     inc bx
     dec dx
-    jnz dibujar_casillas
+    jnz bucle_celdas_fila
 
+    ;Colocar el final de la linea
     mov BYTE PTR [si+bx], 0Dh
     inc bx
     mov BYTE PTR [si+bx], 0Ah
     inc bx
-    loop dibujar_row
+    loop bucle_filas_tablero
 
+    ;Colocar $ al final del tablero
     mov BYTE PTR [si+bx], '$'
     pop dx
     pop cx
     ret
-crear_tablero_interfaz ENDP
+dibujar_tablero_inicial ENDP
 
 ;Procedimiento para empezar un juego
-empezar_juego PROC
-    mov contador, 0
-empezar:
+bucle_principal PROC
+    mov revealed_cells, 0
+
+inicio_partida:
+    ;Imprimir Interfaz
     limpiar_pantalla
     print_msg msg_buscaminas
-    print_msg tablero
+    print_msg msg_number_of_bombs
+    print_number total_bombs
+    print_msg msg_new_line
+    print_msg msg_number_of_flags
+    print_number placed_flags
+    print_msg msg_new_line
+    print_msg display_board
     print_msg msg_new_line
 
-    ; Leer columna (letra)
+    ;Leer tipo movimiento(Letra)
+    print_msg msg_enter_move_type
+    leer_char
+    mov move_type, ax
+    print_msg msg_new_line
+    cmp move_type,'R'
+    je entrada_columna
+    cmp move_type,'F'
+    je entrada_columna
+    jmp continuar_partida
+
+    ; Leer col_index (letra)
+entrada_columna:
     print_msg msg_enter_move_column
-    leer_char
-    call convertir_a_letra
-    cmp ax, error
-    je seguir_juego
+    call convertir_columna
+    cmp ax, ERROR_CODE
+    je continuar_partida
+    mov col_index, ax
     print_msg msg_new_line
-    mov columna, ax
 
-    ; Leer fila (número)
+    ; Leer row_index (número)
     print_msg msg_enter_move_row
-    leer_char
-    call convertir_a_entero
-    cmp ax, error
-    je seguir_juego
-    mov fila, ax
+    call convertir_fila
+    cmp ax, ERROR_CODE
+    je continuar_partida
+    mov row_index, ax
     print_msg msg_new_line
 
-    ; Determinar casilla
-    call determinar_casilla     ; al = valor casilla
-    mov bl, al                  ; bl guarda contenido ('X' o 'O')
-    esperar_tecla
-    cmp bl, 'X'
-    je derrota
+    ;Revisar el tipo de movimiento
+    cmp move_type,'F'
+    je accion_bandera
 
-    ;Si se realiza un movimiento ya hecho no se cuenta
-    call calcular_posicion_tablero
-    lea si, tablero
-    add si, posicion_actual_tablero
-    mov al,[si]
-    cmp al,'-'
-    jne seguir_juego
-
-    ;Calcular numero de bombas adyacentes a la casilla actual
-    call calcular_numero_bombas
-    mov bx,contador_bombs
-    add bl,'0'
-    call revelar_casilla        ; Revela en tablero
+    ;REVELAR
+accion_revelar:
+    call procesar_revelar
     
-    inc contador
-    mov ax, tablero_size
-    sub ax, bombas
-    cmp contador, ax
+    ;Comparaciones para saber si se perdio, victoria o seguir jugando
+    ;Verificar si se perdio
+    cmp al, 'X'
+    je derrota
+    inc revealed_cells
+    ;Verificar si se gano
+    mov ax, board_size
+    sub ax, total_bombs
+    cmp revealed_cells, ax
     je victoria
+    jmp continuar_partida
+    
+    ;FLAG
+accion_bandera:
+    call procesar_bandera
+    esperar_tecla
 
-seguir_juego:
-    jmp empezar
+    ;Siguiente Ronda
+continuar_partida:
+    jmp inicio_partida
 
 victoria:
     limpiar_pantalla
+    print_msg msg_buscaminas
     print_msg msg_victory
     ret
 
 derrota:
     limpiar_pantalla
+    print_msg msg_buscaminas
     print_msg msg_game_over
     ret
-empezar_juego ENDP
+bucle_principal ENDP
 
-;Procedimiento para convertir a columna un letra
-convertir_a_letra PROC
-    push bx
+;Procedimiento para realizar el movimiento revelar
+procesar_revelar PROC
+    ; Determinar casilla
+    call obtener_casilla_oculta     ; al = valor casilla
+    esperar_tecla
+    ;Revisar si se perdio y salir
+    cmp al, 'X'
+    jne verificar_celda_repetida
+    ret
+
+    ;Si se realiza un movimiento ya hecho no se cuenta
+verificar_celda_repetida:
+    call calcular_indice_pantalla
+    lea si, display_board
+    add si, screen_index
+    mov al, [si]
+    cmp al, '-'
+    je calcular_bombas_adyacentes
+    cmp al, '?'
+    je calcular_bombas_adyacentes
+    mov al, '-'
+    ret 
+
+    ;Calcular numero de total_bombs adyacentes a la casilla actual
+calcular_bombas_adyacentes:
+    call contar_bombas_adyacentes
+    mov bx,adjacent_bombs
+    add bl,'0'
+    call actualizar_tablero_visible; Revela en display_board
+    ret
+procesar_revelar ENDP
+
+;Procedimiento para realizar el movimiento flag
+procesar_bandera PROC
+    call calcular_indice_pantalla
+    lea si, display_board
+    add si, screen_index
+    mov bl, [si]
+    cmp bl, '?' ;Si esta con bandera se quita
+    je unflag
+    cmp bl, '-' ;Si tiene numero o otra cosa es movimiento invalido
+    jne error_flag
+    mov BYTE PTR [si], '?' 
+    inc placed_flags 
+    ret
+
+unflag:
+    mov BYTE PTR [si], '-'
+    dec placed_flags
+    ret
+
+error_flag:
+    print_msg msg_invalid_move
+    ret
+procesar_bandera ENDP
+
+;Procedimiento para convertir a col_index una letra
+convertir_columna PROC
+    leer_char
     cmp ax, 'A'
-    jl convertir_error_letra
-    mov bx, tablero_colums
+    jl error_columna_invalida
+    mov bx, board_cols
     dec bx
     add bx, 'A'
     cmp ax, bx
-    jg convertir_error_letra
-    jmp convertir_fin_letra 
-convertir_error_letra:
-    print_msg msg_new_line
-    print_msg msg_invalid_move
-    esperar_tecla
-    mov ax, error
-    pop bx
+    jg error_columna_invalida
+    jmp fin_conversion_columna 
+error_columna_invalida:
+    call mostrar_error_movimiento
+    mov ax, ERROR_CODE
     ret
-convertir_fin_letra:
-    sub ax, 'A'
+fin_conversion_columna:
+    sub ax, 'A' ;se guarda en ax
 fin_letra:
-    pop bx
     ret
-convertir_a_letra ENDP
+convertir_columna ENDP
 
-;Procedimiento para convertir a fila un char
-convertir_a_entero PROC
-    push bx
+;Procedimiento para convertir a row_index un char
+convertir_fila PROC
+    leer_char
     cmp ax, '1'
-    jl convertir_error_entero
-    mov bx, tablero_rows
+    jl error_fila_invalida
+    mov bx, board_rows
     add bx, '0'
     cmp ax, bx
-    jg convertir_error_entero
+    jg error_fila_invalida
     sub ax, '1'
-    pop bx
     ret
-convertir_error_entero:
+error_fila_invalida:
+    call mostrar_error_movimiento
+    mov ax, ERROR_CODE
+    ret
+convertir_fila ENDP
+
+;Procedimiento para mensajes de movimiento invalido
+mostrar_error_movimiento PROC
     print_msg msg_new_line
     print_msg msg_invalid_move
     esperar_tecla
-    mov ax, error
-    pop bx
     ret
-convertir_a_entero ENDP
+ENDP
 
 ;Procedimiento para determinar que hay en la casilla
-determinar_casilla PROC
-    lea si, tablero_game
-    call calcular_posicion_actual
-    mov bx,posicion_actual
+obtener_casilla_oculta PROC
+    lea si, hidden_board
+    call calcular_indice_celda
+    mov bx,cell_index
     mov al,[si+bx]
     ret
-determinar_casilla ENDP
+obtener_casilla_oculta ENDP
 
 ;Procedimiento para calcular la posicion actual dentro del array
-calcular_posicion_actual PROC
-    ;Calcular centro
-    mov ax, tablero_colums
-    mul fila
-    add ax, columna
-    mov posicion_actual, ax
+calcular_indice_celda PROC
+    mov ax, board_cols
+    mul row_index
+    add ax, col_index
+    mov cell_index, ax ;Resultado guardado en cell_index
     ret
-calcular_posicion_actual ENDP
+calcular_indice_celda ENDP
 
-calcular_posicion_tablero PROC
-    push cx
-    mov ax, tablero_colums
-    mov cx, 2d
-    mul cx
-    add ax, 3d
-    mov posicion_actual_tablero, ax
-    add posicion_actual_tablero, 2d ;Primer Numero para empezar en la coordenada 0,0
-    mul fila
-    add posicion_actual_tablero, ax
+;Procedimiento para calcular la posicion actual dentro del display_board
+calcular_indice_pantalla PROC
     mov ax, 2d
-    mul columna
-    add posicion_actual_tablero, ax
-    pop cx
-    ret
-calcular_posicion_tablero ENDP
+    mul board_cols
+    add ax, 3d
+    mov screen_index, ax
+    add screen_index, 2d ;Primer Numero para empezar en la coordenada 0,0
 
-;Procedimiento para calcular el numero de bombas cercanas
-calcular_numero_bombas PROC
+    mul row_index
+    add screen_index, ax
+    mov ax, 2d
+    mul col_index
+    add screen_index, ax ;Resultado guardado en screen_index
+    ret
+calcular_indice_pantalla ENDP
+
+;Procedimiento para calcular el numero de total_bombs cercanas
+contar_bombas_adyacentes PROC
     push bx
     push cx
     push dx
-    mov contador_bombs, 0
-    lea si, tablero_game
-    mov bx, posicion_actual
-    mov cx, tablero_colums
+    mov adjacent_bombs, 0
+    lea si, hidden_board
+    mov bx, cell_index
+    mov cx, board_cols
     dec cx
 
-;Fila Superior
-    ;Mirar si esta en la primera fila
-    mov ax, tablero_colums
-    cmp posicion_actual, ax
+fila_superior:
+    ;Mirar si el centro esta en la primera fila
+    mov ax, board_cols
+    cmp cell_index, ax
     jl fila_central
-    sub bx, tablero_colums
+
+casilla_superior_izquierda:
+    sub bx, board_cols
     dec bx
-    cmp columna, 0
-    je casilla2
+    cmp col_index, 0 ; Si la columna es 0 no tiene izquierda
+    je casilla_superior_centro
     call verificar_bomba
-casilla2:
+
+casilla_superior_centro:
     inc bx
     call verificar_bomba
+
+casilla_superior_derecha:
     inc bx
-    cmp columna, cx
+    cmp col_index, cx ; Si la columna es 0 no tiene izquierda
     je fila_central
     call verificar_bomba
 
-;Fila Central
 fila_central:
-    mov bx, posicion_actual
+casilla_central_izquierda:
+    mov bx, cell_index
     dec bx
-    cmp columna, 0
-    je casilla5
+    cmp col_index, 0
+    je casilla_central_derecha
     call verificar_bomba
-casilla5:
+
+casilla_central_derecha:
     add bx, 2d
-    cmp columna, cx
+    cmp col_index, cx
     je fila_inferior
     call verificar_bomba
 
-;Fila Inferior
 fila_inferior:
-    mov ax, tablero_size
-    sub ax, tablero_colums
-    cmp posicion_actual, ax
-    jge fin_calcular_bombas
-    add bx, tablero_colums
+    ;Mirar si el centro esta en la ultima fila
+    mov ax, board_size
+    sub ax, board_cols
+    cmp cell_index, ax
+    jge fin_contar_bombas
+
+casilla_inferior_izquierda:
+    add bx, board_cols
     sub bx, 2d
-    cmp columna, 0
-    je casilla7
-    call verificar_bomba
-casilla7:
-    inc bx
-    call verificar_bomba
-casilla8:
-    inc bx
-    cmp columna, cx
-    je fin_calcular_bombas
+    cmp col_index, 0
+    je casilla_inferior_centro
     call verificar_bomba
 
-fin_calcular_bombas:
+casilla_inferior_centro:
+    inc bx
+    call verificar_bomba
+
+casilla_inferior_derecha:
+    inc bx
+    cmp col_index, cx
+    je fin_contar_bombas
+    call verificar_bomba
+
+fin_contar_bombas:
     pop dx
     pop cx
     pop bx
     ret
-calcular_numero_bombas ENDP
+contar_bombas_adyacentes ENDP
 
+;Procedimiento para verificar si la posicion vista es una bomba
 verificar_bomba PROC
+    ;Verificar si se pasa de los limites
     cmp bx, 0
-    jl no_bomba
-    mov ax, tablero_size
-    cmp bx, ax
-    jge no_bomba
+    jl sin_bomba
+    cmp bx, board_size
+    jge sin_bomba
+    ;Verificar si es una bomba
     mov al, [si+bx]
     cmp al, 'X'
-    jne no_bomba
-    inc contador_bombs
-no_bomba:
+    jne sin_bomba
+    inc adjacent_bombs
+
+sin_bomba:
     ret
 verificar_bomba ENDP
 
 ;Procedimiento para revelar la casilla
-revelar_casilla PROC
-    lea si, tablero
-    call calcular_posicion_tablero
-    add si, posicion_actual_tablero
+actualizar_tablero_visible PROC
+    lea si, display_board
+    add si, screen_index
     mov BYTE PTR [si], bl
     ret
-revelar_casilla ENDP
+actualizar_tablero_visible ENDP
 
-crear_tablero_real PROC
+;Procedimiento para mostrar todo el display_board revelado
+mostrar_tablero_final PROC
     push cx
     push dx
-    mov ax, tablero_colums
-    mov cx, 2d
-    mul cx
+    mov ax, 2d
+    mul board_cols
     sub ax, 1d
     mov cx, ax
-    lea si, tablero
+    lea si, display_board
     mov bx, 0d
     mov BYTE PTR [si+bx],' '
     inc bx
     mov BYTE PTR [si+bx],' '
     inc bx
-dibujar_letras_real:
+
+bucle_columnas_final:
     test bx,1
-    jz letra_real
-    jmp espacio_real 
-letra_real:
+    jz escribir_letra_final
+    jmp escribir_espacio_final 
+
+escribir_letra_final:
     mov ax, bx
     push bx
     mov bx, 2d
@@ -644,90 +846,105 @@ letra_real:
     sub ax, 1
     add ax, 'A'
     mov BYTE PTR [si+bx], al
-    jmp fin_crear_real
-espacio_real:
-    mov BYTE PTR [si+bx], ' '
-fin_crear_real:
-    inc bx
-    loop dibujar_letras_real
+    jmp fin_columnas_final
 
+escribir_espacio_final:
+    mov BYTE PTR [si+bx], ' '
+
+fin_columnas_final:
+    inc bx
+    loop bucle_columnas_final
+
+    ;Colocar final de linea
     mov BYTE PTR [si+bx], 0Dh
     inc bx
     mov BYTE PTR [si+bx], 0Ah
     inc bx
 
-    mov cx, tablero_rows
-    mov contador, 1d
-    mov aux, 0d
-dibujar_row_real:
-    mov ax, contador
+    ;Repetir por cada fila
+    mov cx, board_rows
+    mov revealed_cells, 1d
+    mov temp_counter, 0d
+
+bucle_filas_final:
+    mov ax, revealed_cells
     add ax, '0'  
     mov BYTE PTR [si+bx], al
     inc bx
-    inc contador
-    mov dx, tablero_colums
-dibujar_casillas_real:
+    inc revealed_cells
+    mov dx, board_cols
+
+bucle_celdas_final:
     mov BYTE PTR [si+bx], ' '
     inc bx
     push bx
     push si
-    lea si, tablero_game
-    mov bx, aux
+    lea si, hidden_board
+    mov bx, temp_counter
     mov al, [si+bx]
-    inc aux
+    inc temp_counter
     pop si
     pop bx
     mov BYTE PTR [si+bx], al
     inc bx
     dec dx
-    jnz dibujar_casillas_real
+    jnz bucle_celdas_final
 
+    ;Colocar final de linea
     mov BYTE PTR [si+bx], 0Dh
     inc bx
     mov BYTE PTR [si+bx], 0Ah
     inc bx
-    loop dibujar_row_real
+    loop bucle_filas_final
 
+    ;Colocar $ al final del tablero
     mov BYTE PTR [si+bx], '$'
     pop dx
     pop cx
     ret
-crear_tablero_real ENDP
+mostrar_tablero_final ENDP
 
-reiniciar_juego PROC
+;Procedimiento para reiniciar todas las variables del juego
+reiniciar_estado_juego PROC
     ;Reinicia contadores y variables
-    mov contador, 0
-    mov contador_bombs, 0
-    mov fila, 0
-    mov columna, 0
-    mov posicion_actual, 0
+    mov revealed_cells, 0
+    mov total_bombs, 0
+    mov adjacent_bombs, 0
+    mov placed_flags, 0
+    mov row_index, 0
+    mov col_index, 0
+    mov cell_index, 0
+    mov screen_index, 0
+    mov temp_counter, 0
 
-    ;Limpiar tablero interno (tablero_game)
+    ;Limpiar display_board interno (hidden_board)
     push cx
     push si
-    lea si, tablero_game
-    mov cx, tablero_size
+    lea si, hidden_board
+    mov cx, board_size
     mov al, 'O'
-llenar_tablero:
+
+bucle_rellenar_interno:
     mov [si], al
     inc si
-    loop llenar_tablero
+    loop bucle_rellenar_interno
     pop si
     pop cx
 
-    ;Limpiar tablero visible (tablero)
+    ;Limpiar display_board visible (display_board)
     push cx
     push si
-    lea si, tablero
-    mov cx, 221; Tamaño fijo del buffer
+    lea si, display_board
+    mov cx, 211; Tamaño fijo del buffer
     mov al, 0
-limpiar_tablero:
+    
+bucle_limpiar_visible:
     mov [si], al
     inc si
-    loop limpiar_tablero
+    loop bucle_limpiar_visible
     pop si
     pop cx
     ret
-reiniciar_juego ENDP
+reiniciar_estado_juego ENDP
 
 end main
