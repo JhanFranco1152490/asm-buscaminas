@@ -304,9 +304,9 @@ inicio_juego:
     cmp ax, 'x'
     je terminar_programa
     cmp ax, 'S'
-    jne pedir_datos
+    je pedir_datos
     cmp ax, 's'
-    jne pedir_datos
+    je pedir_datos
     jmp inicio_juego
 
 pedir_datos:
