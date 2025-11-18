@@ -8,30 +8,48 @@
 .data
 
     ; Mensajes de la aplicacion
-    msg_welcome db 'Bienvenido al Buscaminas!',0Dh,0Ah,'$'
-    msg_start_game db 'Presiona para empezar el juego',0Dh,0Ah,'$'
-    msg_buscaminas db 'BUSCAMINAS ASSEMBLER',0Dh,0Ah,'$'
-    msg_enter_move_type db 'Ingresa el tipo de movimiento(R:Revelar,F:Flag): $'
-    msg_enter_rows db 'Ingresa las Filas del Tablero(1-9): $'
-    msg_enter_colums db 'Ingresa las Columnas del Tablero(1-9): $'
-    msg_enter_bombs db 'Ingresa Bombas del Tablero (Maximo $'
-    msg_enter_bombs2 db '): $'
-    msg_invalid_entry db 'Dato Invalido',0Dh,0Ah,'$'
-    msg_number_of_bombs db 'Numero de Bombas: $'
-    msg_number_of_flags db 'Numero de Banderas: $'
-    msg_enter_move_row db 'Ingresa tu movimiento (fila): $'
-    msg_enter_move_column db 'Ingresa tu movimiento (columna): $'
-    msg_invalid_move db 'Movimiento invalido!',0Dh,0Ah,'$'
-    msg_game_over db 'Juego terminado! PERDISTE',0Dh,0Ah,'$'
-    msg_victory db 'Felicidades, has ganado!',0Dh,0Ah,'$'
-    msg_new_game db 'Presiona X para volver a jugar',0Dh,0Ah,'$'
-    msg_new_line db 0Dh,0Ah,'$'
+    msg_title_buscaminas        db  0C9h,30 dup(0CDh),0BBh,0Dh,0Ah
+                                db  0BAh,'        BUSCAMINAS ASM        ',0BAh,0Dh,0Ah
+                                db  0BAh,30 dup(0CDh),0BAh,0Dh,0Ah,'$'
+    msg_start_interface         db  0BAh,'   Presiona [S] para jugar    ',0BAh,0Dh,0Ah
+                                db  0BAh,'   Presiona [X] para salir    ',0BAh,0Dh,0Ah
+                                db  0C8h,30 dup(0CDh),0BCh,0Dh,0Ah,'$'
+    msg_enter_rows              db 'Ingresa las Filas del Tablero(1-9): $'
+    msg_enter_colums            db 'Ingresa las Columnas del Tablero(1-9): $'
+    msg_enter_bombs             db 'Ingresa Bombas del Tablero (Maximo $'
+    msg_enter_bombs2            db '): $'
+    msg_invalid_entry           db 'Dato Invalido',0Dh,0Ah,'$'
+    ;Interfaz Bucle Principal
+    msg_interface_buscaminas1   db 0BAh,'  Bombas: $'
+    msg_interface_buscaminas2   db '                  ',0BAh,0Dh,0Ah
+                                db 0BAh,'  Banderas colocadas: $'
+    msg_interface_buscaminas3   db '      ',0BAh,0Dh,0Ah
+                                db 0C8h,30 dup(0CDh),0BCh,0Dh,0Ah,'$'
+    msg_enter_move_type         db 'Ingresa el tipo de movimiento([R]:Revelar,[F]:Flag,[X]:Salir): $'
+    msg_enter_move_row          db 'Ingresa tu movimiento (fila): $'
+    msg_enter_move_column       db 'Ingresa tu movimiento (columna): $'
+    msg_invalid_move            db 'Movimiento invalido!',0Dh,0Ah,'$'
+    msg_game_over_interface     db  0BAh,'          GAME OVER           ',0BAh,0Dh,0Ah
+                                db  0BAh,'    Has perdido la partida    ',0BAh,0Dh,0Ah
+                                db  0BAh,'                              ',0BAh,0Dh,0Ah
+                                db  0BAh,'   Presiona [X] para volver   ',0BAh,0Dh,0Ah
+                                db  0BAh,'         al menu.             ',0BAh,0Dh,0Ah
+                                db  0C8h,30 dup(0CDh),0BCh,0Dh,0Ah,'$'
+    msg_victory_interface       db  0BAh,'          |VICTORIA!          ',0BAh,0Dh,0Ah
+                                db  0BAh,'    Has limpiado el tablero   ',0BAh,0Dh,0Ah
+                                db  0BAh,'       exitosamente.          ',0BAh,0Dh,0Ah
+                                db  0BAh,'                              ',0BAh,0Dh,0Ah
+                                db  0BAh,'   Presiona [X] para volver   ',0BAh,0Dh,0Ah
+                                db  0BAh,'         al menu.             ',0BAh,0Dh,0Ah
+                                db  0C8h,30 dup(0CDh),0BCh,0Dh,0Ah,'$'
+    msg_revealed_board          db  'Tablero del juego revelado:',0Dh,0Ah,'$'
+    msg_new_line                db 0Dh,0Ah,'$'
 
     ;Tablero a imprimir
     display_board db 211 dup(0) ;211 = (1+(2*9columnas)+1(0A)+1(0D))*10filas+1($)
 
     ;Tablero interno
-    hidden_board db 211 dup('O')
+    hidden_board db 81 dup('O')
     
     ;Buffer para ints
     input_buffer db 10, 0, 10 dup(0) ;10 Espacios
@@ -53,6 +71,8 @@
     ERROR_CODE          equ -1
 
 .code
+
+;MACROS
 
 ;Macro para limpiar la pantalla
 limpiar_pantalla macro
@@ -275,29 +295,43 @@ main PROC
 inicio_juego:
     ;limpiar pantalla
     limpiar_pantalla
-    ; Mostrar mensaje de bienvenida
-    print_msg msg_welcome
-    print_msg msg_start_game
-    esperar_tecla
+    ; Mostrar Interfaz Inicial
+    print_msg msg_title_buscaminas
+    print_msg msg_start_interface
+    leer_char
+    cmp ax, 'X'
+    je terminar_programa
+    cmp ax, 'x'
+    je terminar_programa
+    cmp ax, 'S'
+    jne pedir_datos
+    cmp ax, 's'
+    jne pedir_datos
+    jmp inicio_juego
+
+pedir_datos:
     call leer_configuracion_tablero
     call generar_bombas_aleatorias
     call dibujar_tablero_inicial
     call bucle_principal
 
 reiniciar_partida:
+    print_msg msg_revealed_board
     call mostrar_tablero_final
     print_msg display_board
-    print_msg msg_new_game
     leer_char
     cmp ax, 'X'
-    jne terminar_programa
+    je reinicio
+    cmp ax, 'x'
+    je reinicio
+    jmp terminar_programa
+reinicio:
     call reiniciar_estado_juego
     jmp inicio_juego
 
     ;Salir del programa
 terminar_programa:
-    mov ah, 4Ch
-    int 21h
+    call terminar_programa_proc
 main ENDP
     
 ;PROCEDIMIENTOS
@@ -497,13 +531,22 @@ bucle_principal PROC
 inicio_partida:
     ;Imprimir Interfaz
     limpiar_pantalla
-    print_msg msg_buscaminas
-    print_msg msg_number_of_bombs
+    print_msg msg_title_buscaminas
+    print_msg msg_interface_buscaminas1
     print_number total_bombs
-    print_msg msg_new_line
-    print_msg msg_number_of_flags
+    cmp total_bombs, 10
+    jge imprimir_banderas
+    print_char ' '
+
+imprimir_banderas:
+    print_msg msg_interface_buscaminas2
     print_number placed_flags
-    print_msg msg_new_line
+    cmp placed_flags, 10
+    jge imprimir_tablero
+    print_char ' '
+
+imprimir_tablero:
+    print_msg msg_interface_buscaminas3
     print_msg display_board
     print_msg msg_new_line
 
@@ -514,11 +557,22 @@ inicio_partida:
     print_msg msg_new_line
     cmp move_type,'R'
     je entrada_columna
+    cmp move_type,'r'
+    je entrada_columna
     cmp move_type,'F'
     je entrada_columna
+    cmp move_type,'f'
+    je entrada_columna
+    cmp move_type,'X'
+    je terminar_juego
+    cmp move_type,'x'
+    je terminar_juego
     jmp continuar_partida
 
-    ; Leer col_index (letra)
+terminar_juego:
+    call terminar_programa_proc
+
+    ; Leer columna (letra)
 entrada_columna:
     print_msg msg_enter_move_column
     call convertir_columna
@@ -527,7 +581,7 @@ entrada_columna:
     mov col_index, ax
     print_msg msg_new_line
 
-    ; Leer row_index (número)
+    ; Leer fila (número)
     print_msg msg_enter_move_row
     call convertir_fila
     cmp ax, ERROR_CODE
@@ -537,6 +591,8 @@ entrada_columna:
 
     ;Revisar el tipo de movimiento
     cmp move_type,'F'
+    je accion_bandera
+    cmp move_type,'f'
     je accion_bandera
 
     ;REVELAR
@@ -566,14 +622,14 @@ continuar_partida:
 
 victoria:
     limpiar_pantalla
-    print_msg msg_buscaminas
-    print_msg msg_victory
+    print_msg msg_title_buscaminas
+    print_msg msg_victory_interface
     ret
 
 derrota:
     limpiar_pantalla
-    print_msg msg_buscaminas
-    print_msg msg_game_over
+    print_msg msg_title_buscaminas
+    print_msg msg_game_over_interface
     ret
 bucle_principal ENDP
 
@@ -636,6 +692,13 @@ procesar_bandera ENDP
 ;Procedimiento para convertir a col_index una letra
 convertir_columna PROC
     leer_char
+    cmp ax,'a'
+    jl validar_columna
+    cmp ax,'z'
+    jg validar_columna
+    sub ax,32 ;Convertir a Mayuscula
+
+validar_columna:
     cmp ax, 'A'
     jl error_columna_invalida
     mov bx, board_cols
@@ -677,7 +740,7 @@ mostrar_error_movimiento PROC
     print_msg msg_invalid_move
     esperar_tecla
     ret
-ENDP
+mostrar_error_movimiento ENDP
 
 ;Procedimiento para determinar que hay en la casilla
 obtener_casilla_oculta PROC
@@ -946,5 +1009,10 @@ bucle_limpiar_visible:
     pop cx
     ret
 reiniciar_estado_juego ENDP
+
+terminar_programa_proc PROC
+    mov ah, 4Ch
+    int 21h
+terminar_programa_proc ENDP
 
 end main
